@@ -1,0 +1,19 @@
+{
+    "compilerOptions": {
+      "target": "es5",
+      "module": "commonjs",
+      "moduleResolution": "node",
+      "declaration": true,
+      "removeComments": true,
+      "strict": true,
+      "noImplicitAny": true,
+      "allowJs": true,
+      "noImplicitReturns": true,
+      "sourceMap": true,
+      "outDir": "./dist",
+      "lib": [
+        "es2015",
+        "dom"
+      ]
+    }
+  }

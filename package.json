@@ -1,0 +1,30 @@
+{
+  "name": "payplus-hosted-fields",
+  "version": "0.0.1",
+  "description": "PayPlus Hosted Fields",
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build:webpack": "webpack --mode=production",
+    "build": "npm i && npm run build:webpack"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PayplusPayment/PayPlusHostedFields"
+  },
+  "files": [
+    "dist"
+  ],
+  "devDependencies": {
+    "@types/lodash": "^4.14.194",
+    "ts-loader": "^9.4.2",
+    "typescript": "^5.0.4",
+    "webpack": "^5.82.1",
+    "webpack-cli": "^5.1.1"
+  },
+  "dependencies": {
+    "lodash": "^4.17.21",
+    "path": "^0.12.7",
+    "process": "^0.11.10",
+    "terser-webpack-plugin": "^5.3.8"
+  }
+}
