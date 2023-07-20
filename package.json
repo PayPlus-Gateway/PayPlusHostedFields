@@ -5,7 +5,8 @@
   "scripts": {
     "clean": "rm -rf dist",
     "build:webpack": "webpack --mode=production",
-    "build": "npm i && npm run build:webpack"
+    "build": "npm i && npm run build:webpack",
+    "test": ""
   },
   "repository": {
     "type": "git",
