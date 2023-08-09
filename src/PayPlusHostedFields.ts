@@ -25,6 +25,7 @@ export default abstract class PayPlusHostedFields {
 		expiry?: boolean, 
 		expiryy?: boolean
 		expirym?: boolean,
+		recaptcha?: boolean
 	 } = {
 		cc: false,
 		expiry: false,
@@ -40,6 +41,10 @@ export default abstract class PayPlusHostedFields {
 	} = {} as any;
 	private __expirySeparateFields: boolean = false;
 	
+	private __recaptchaReplacementElm: HTMLElement | null = null;
+	private __recaptchaIframeElm: HTMLIFrameElement | null = null;
+	private __showRecaptcha: boolean = false;
+	private __recaptchaToken: string = "";
 	protected init() {		
 		this.ResetInputs();
 		this.InitPaymentPage = deferred();
@@ -67,6 +72,15 @@ export default abstract class PayPlusHostedFields {
 			};
 		}
 		
+		return this;
+	}
+
+	SetRecaptcha(elmSelector: string) {
+		this.validateOrThrow();
+		if (!document.querySelector(elmSelector)) {
+			throw new Error("Missing required field data");
+		}
+		this.__recaptchaReplacementElm = document.querySelector(elmSelector);
 		return this;
 	}
 
@@ -123,6 +137,11 @@ export default abstract class PayPlusHostedFields {
 				this.__origin
 			);
 		}
+
+		this.__recaptchaIframeElm!.contentWindow!.postMessage(
+			{ type: "execute-recaptcha-req" },
+			this.__origin
+		);
 		return this.__paymentPageDfrd;
 	}
 
@@ -145,6 +164,7 @@ export default abstract class PayPlusHostedFields {
 			expiry: false,
 			expiryy: false,
 			expirym: false,
+			recaptcha: false,
 		};
 		let fields = ['cc', 'cvv']
 		if (this.__expirySeparateFields) {
@@ -185,6 +205,7 @@ export default abstract class PayPlusHostedFields {
 	}
 
 	private initPaymentPage(data: any) {
+		this.addCSS();
 		this.initHostedFieldIframe('cc');
 		if (this.__expirySeparateFields) {
 			this.initHostedFieldIframe('expiryy');
@@ -195,6 +216,7 @@ export default abstract class PayPlusHostedFields {
 			this.removeFieldAndWrapper("expiryy");
 			this.removeFieldAndWrapper("expirym");
 		}
+		this.initRecaptcha(data);
 		
 		for (const key in this.DataInput.fields.non_hosted_fields) {
 			this.initNonHostedField(key, this.DataInput.fields.non_hosted_fields);
@@ -278,6 +300,8 @@ export default abstract class PayPlusHostedFields {
 						case "cc-type":
 							this.event_ccType(event.data.data);
 							break;
+						case "recaptcha-token-resp":
+							break;
 					}
 				}
 			},
@@ -306,16 +330,23 @@ export default abstract class PayPlusHostedFields {
 		this.__AwaitingFields[
 			event.data.name as keyof typeof this.__AwaitingFields
 		] = true;
-		if (!event.data.data.success) {
-			this.__hostedFields[event.data.name as HostedFieldsKeys].error = event.data.data.message;
-			this.__hostedFields[event.data.name as HostedFieldsKeys].elm!.classList.add(HTMLClasses.IFRAME_CLASS_ERR);
-			this.formResponse(event.data.data);
+		if (event.data.name == 'recaptcha') {
+			this.__recaptchaToken = event.data.data;
+			this.__AwaitingFields.recaptcha = false;
+		} else {
+			if (!event.data.data.success) {
+				this.__hostedFields[event.data.name as HostedFieldsKeys].error = event.data.data.message;
+				this.__hostedFields[event.data.name as HostedFieldsKeys].elm!.classList.add(HTMLClasses.IFRAME_CLASS_ERR);
+				this.formResponse(event.data.data);
+			}
 		}
 		if (this.__AwaitingFields.cc) {
 			if (
 				this.__AwaitingFields.expiry
 				|| (this.__AwaitingFields.expirym && this.__AwaitingFields.expiryy)) {
-				this.readyToSubmit();
+					if (!this.__showRecaptcha || !this.__AwaitingFields.recaptcha) {
+						this.readyToSubmit();
+					}
 			}
 		}
 	}
@@ -392,6 +423,9 @@ export default abstract class PayPlusHostedFields {
 			let fieldGroup = nonHostedFieldsMapping[key] || "extra_fields";
 			this.ChargeRequest.SetParam(value, key, fieldGroup);
 		}
+		if (this.__recaptchaToken) {
+			this.ChargeRequest.SetParam(this.__recaptchaToken, 'recaptcha_hash', 'payment');
+		}
 	}
 
 	private readyToSubmit() {
@@ -431,6 +465,34 @@ export default abstract class PayPlusHostedFields {
 		this.__hostedFields[name as HostedFieldsKeys].elm = iframeElm;
 	}
 
+	private initRecaptcha(data:any) {
+		this.__showRecaptcha = data.data.payment_page.field_content_settings.show_recaptcha;
+		if (!this.__showRecaptcha) {
+			return
+		}
+		if (this.__recaptchaReplacementElm == null) {
+			throw new Error("Missing required field data");
+		}
+		const iframeElm = document.createElement("iframe");
+		iframeElm.setAttribute("class", `hsted-Flds--r-recaptcha-iframe hsted-Flds--r-recaptcha-iframe--v3`);		
+		iframeElm.setAttribute("id", `hsted-Flds--r-recaptcha-iframe`);
+		iframeElm.setAttribute("scrolling", `no`);
+		iframeElm.setAttribute(
+			"src", [
+				this.__origin,
+				"api",
+				"hosted-field",
+				this.__page_request_uid,
+				this.__hosted_fields_uuid,
+				"recaptcha",
+				3
+			].join("/")
+		);
+		iframeElm.setAttribute("frameborder", "0");
+		this.__recaptchaReplacementElm.replaceWith(iframeElm);
+		this.__recaptchaIframeElm = iframeElm;
+	}
+
 	private hideCVVIframe() {
 		if (this.__hostedFields.cvv.wrapperSelector) {
 			const wrapperELM = document.querySelector(
@@ -462,5 +524,21 @@ export default abstract class PayPlusHostedFields {
 		if (hostedFieldsKeys.length !== HostedFieldsKeysList.length) {
 			throw new Error("Hosted fields are not fully initialized");
 		}
+	}
+
+	private addCSS() {
+		const css = 
+			`.hsted-Flds--r-recaptcha-iframe.hsted-Flds--r-recaptcha-iframe--v3 {
+				right: -187px;
+				position: fixed;
+				width: 257px;
+				height: 63px;
+			}.hsted-Flds--r-recaptcha-iframe.hsted-Flds--r-recaptcha-iframe--v3:hover {
+				right : 0 !important;
+				transition: right 0.3s ease 0s !important;
+			}`;
+		const style = document.createElement('style');
+		style.appendChild(document.createTextNode(css));
+		document.head.appendChild(style);
 	}
 }

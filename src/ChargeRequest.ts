@@ -37,6 +37,7 @@ class ChargeRequest {
                 data[key] = this[key as keyof ChargeRequest];
             }
         }
+        console.log(this.payment.recaptcha_hash)
         return data;
     }
 
@@ -70,7 +71,7 @@ class ChargeRequest {
             card_holder_name: "",
             card_holder_id: "",
             card_holder_phone: "",
-            payments: 0,
+            payments: 1,
             approved_terms: false,
             recaptcha_hash: "",
             selected_products: ""
