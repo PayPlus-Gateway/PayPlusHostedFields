@@ -55,6 +55,12 @@ interface InitHostedFieldsData {
 	expirym: {elmSelector: string, wrapperElmSelector: string},
 }
 
+interface Config {
+	Secure3Ds: {
+		ResetStyle: boolean;
+	}
+}
+
 enum HTMLClasses {
 	IFRAME_CLASS = "__payplus_hosted_fields_item_fld-frame",
 	IFRAME_CLASS_ERR = "__payplus_hosted_fields_err_fld",
@@ -67,6 +73,7 @@ enum EventNames {
 	RESPONSE_FROM_SERVER = "pp_responseFromServer",
 	SUBMIT_PROCESS = "pp_submitProcess",
 	CC_TYPE_CHANGE = "pp_ccTypeChange",
+	SECURE_3DS_WINDOW = "pp_secure3dsWindow",
 }
 
 type HostedFieldsKeys = 'cc' | 'cvv' | 'expiry' | 'expiryy' | 'expirym';
@@ -113,5 +120,6 @@ export {
 	nonHostedFieldsMapping,
 	nonHostedFieldFieldsList,
 	HostedFieldsKeysList,
-	InitHostedFieldsData
+	InitHostedFieldsData,
+	Config
 };

@@ -1,6 +1,7 @@
 import BaseDataInput from "./BaseDataInput";
 import ChargeRequest from "./ChargeRequest";
 import {
+	Config,
 	EventNames,
 	HTMLClasses,
 	HostedFieldData,
@@ -14,6 +15,7 @@ export default abstract class PayPlusHostedFields {
 	abstract DataInput: BaseDataInput;
 	InitPaymentPage: any;
 	ChargeRequest:typeof ChargeRequest = ChargeRequest;
+	private config: Config;
 	private numberOfAttempts: number = 0;
 	private __page_request_uid: string = "";
 	private __hosted_fields_uuid: string = "";
@@ -45,10 +47,36 @@ export default abstract class PayPlusHostedFields {
 	private __recaptchaIframeElm: HTMLIFrameElement | null = null;
 	private __showRecaptcha: boolean = false;
 	private __recaptchaToken: string = "";
+	private __securee3dsIframeElm: HTMLIFrameElement | null = null;
+
+	constructor() {
+		this.config = {
+			Secure3Ds: {
+				ResetStyle: false
+			}
+		}
+	}
+
 	protected init() {		
 		this.ResetInputs();
 		this.InitPaymentPage = deferred();
 		this.listenForMessages();
+	}
+
+	SetConfig(key:string, value:any) {
+		const path = key.split(".");
+		let obj:any = this.config;
+		for (let i = 0; i < path.length - 1; i++) {
+			if (obj.hasOwnProperty(path[i])) {
+				obj = obj[path[i]];
+			} else {
+				throw new Error("invalid-config-key");
+			}
+		}
+		if (!obj.hasOwnProperty(path[path.length - 1])) {
+			throw new Error("invalid-config-key");
+		}
+		obj[path[path.length - 1]] = value;
 	}
 
 	SetMainFields(fldsData: InitHostedFieldsData) {
@@ -137,11 +165,12 @@ export default abstract class PayPlusHostedFields {
 				this.__origin
 			);
 		}
-
-		this.__recaptchaIframeElm!.contentWindow!.postMessage(
-			{ type: "execute-recaptcha-req" },
-			this.__origin
-		);
+		if (this.__recaptchaIframeElm) {
+			this.__recaptchaIframeElm!.contentWindow!.postMessage(
+				{ type: "execute-recaptcha-req" },
+				this.__origin
+			);
+		}
 		return this.__paymentPageDfrd;
 	}
 
@@ -300,8 +329,17 @@ export default abstract class PayPlusHostedFields {
 						case "cc-type":
 							this.event_ccType(event.data.data);
 							break;
-						case "recaptcha-token-resp":
+						case "secure-3ds":
+							this.toggleSecure3dsIframe(event.data.data)
 							break;
+						default:
+							if(event.data && event.data.messageTransaction3DS != null) {
+								this.toggleSecure3dsIframe(null)
+								if (event.data.data.data) {
+									return this.formResponse(event.data.data);
+								}
+								this.formResponse(event.data);
+							}
 					}
 				}
 			},
@@ -465,6 +503,22 @@ export default abstract class PayPlusHostedFields {
 		this.__hostedFields[name as HostedFieldsKeys].elm = iframeElm;
 	}
 
+	private toggleSecure3dsIframe(src: string | null) {
+		if (src === null) {
+			if (this.__securee3dsIframeElm) {
+				this.__securee3dsIframeElm.remove();
+				this.fireCustomEvent(EventNames.SECURE_3DS_WINDOW, false);
+			}
+			return
+		}
+		const iframeElm = document.createElement("iframe");
+		document.body.appendChild(iframeElm);
+		iframeElm.setAttribute("src", src);
+		iframeElm.setAttribute("class", `hsted-Flds--r-secure3ds-iframe`);
+		this.__securee3dsIframeElm = iframeElm;
+		this.fireCustomEvent(EventNames.SECURE_3DS_WINDOW, true);
+	}
+
 	private initRecaptcha(data:any) {
 		this.__showRecaptcha = data.data.payment_page.field_content_settings.show_recaptcha;
 		if (!this.__showRecaptcha) {
@@ -528,7 +582,7 @@ export default abstract class PayPlusHostedFields {
 
 	private addCSS() {
 		const css = 
-			`.hsted-Flds--r-recaptcha-iframe.hsted-Flds--r-recaptcha-iframe--v3 {
+			[`.hsted-Flds--r-recaptcha-iframe.hsted-Flds--r-recaptcha-iframe--v3 {
 				right: -187px;
 				position: fixed;
 				width: 257px;
@@ -536,9 +590,22 @@ export default abstract class PayPlusHostedFields {
 			}.hsted-Flds--r-recaptcha-iframe.hsted-Flds--r-recaptcha-iframe--v3:hover {
 				right : 0 !important;
 				transition: right 0.3s ease 0s !important;
-			}`;
+			}`];
+		if (!this.config.Secure3Ds.ResetStyle) {
+			css.push(`.hsted-Flds--r-secure3ds-iframe{
+				position: fixed;
+				width: 500px;
+				height: 500px;
+				top: 0;
+				bottom: 0;
+				left: 0;
+				right: 0;
+				margin: auto;
+				z-index: 999999;
+			}`);
+		}
 		const style = document.createElement('style');
-		style.appendChild(document.createTextNode(css));
+		style.appendChild(document.createTextNode(css.join("")));
 		document.head.appendChild(style);
 	}
 }
