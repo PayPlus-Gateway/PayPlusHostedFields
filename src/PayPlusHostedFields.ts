@@ -317,6 +317,9 @@ export default abstract class PayPlusHostedFields {
 			(event) => {
 				if (event.data) {
 					switch (event.data.type) {
+						case "fld-validation":
+							this.fld_validation(event);
+							break;
 						case "init":
 							this.event_init(event);
 							break;
@@ -351,6 +354,18 @@ export default abstract class PayPlusHostedFields {
 		this.__hostedFields.cc.elm?.setAttribute("data-card-type", cardType);
 		this.fireCustomEvent(EventNames.CC_TYPE_CHANGE, cardType);
 	}
+	private fld_validation(event: any) {
+		if (event.data && event.data.data) {
+			if (event.data.data.error) {
+				this.__hostedFields[event.data.data.name as HostedFieldsKeys].error = event.data.data.message;
+				this.__hostedFields[event.data.data.name as HostedFieldsKeys].elm!.classList.add(HTMLClasses.IFRAME_CLASS_ERR);
+			} else {
+				this.__hostedFields[event.data.data.name as HostedFieldsKeys].error = '';
+				this.__hostedFields[event.data.data.name as HostedFieldsKeys].elm!.classList.remove(HTMLClasses.IFRAME_CLASS_ERR);
+			}
+		}
+	}
+
 	private event_init(event: any) {
 		this.__paymentPageData = event.data.data;
 		this.setPageExpiration(
