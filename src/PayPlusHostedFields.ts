@@ -273,6 +273,7 @@ export default abstract class PayPlusHostedFields {
 	}
 
 	private showField(field: string) {
+		const secure3d = this.__paymentPageData.secure3d
 		const payment_form_fields =
 			this.__paymentPageData.payment_page.field_content_settings
 				.payment_form_fields;
@@ -287,7 +288,10 @@ export default abstract class PayPlusHostedFields {
 				return this.__paymentPageData.payment_page.field_content_settings
 					.on_behalf_of_field;
 			case "card_holder_name":
-				return payment_form_fields.show_cc_name;
+				return payment_form_fields.show_cc_name || secure3d;
+			case "card_holder_phone":
+			case "card_holder_phone_prefix":
+				return secure3d;
 			case "card_holder_id":
 				return payment_form_fields.show_id;
 			case "payments":

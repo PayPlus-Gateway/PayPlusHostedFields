@@ -4,6 +4,8 @@ interface NonHostedFields {
 		payments: NonHostedFieldData;
 		card_holder_id: NonHostedFieldData;
 		card_holder_name: NonHostedFieldData;
+		card_holder_phone: NonHostedFieldData;
+		card_holder_phone_prefix: NonHostedFieldData;
 		custom_invoice_name: NonHostedFieldData;
 		customer_name: NonHostedFieldData;
 		vat_number: NonHostedFieldData;
@@ -83,6 +85,8 @@ const nonHostedFieldsMapping: any = {
 	payments: "payment",
 	card_holder_id: "payment",
 	card_holder_name: "payment",
+	card_holder_phone: "payment",
+	card_holder_phone_prefix: "payment",
 	custom_invoice_name: "payment",
 	customer_name: "customer",
 	vat_number: "customer",
@@ -97,6 +101,8 @@ const nonHostedFieldFieldsList = [
     "payments",
     "card_holder_id",
     "card_holder_name",
+	"card_holder_phone",
+	"card_holder_phone_prefix",
     "custom_invoice_name",
     "customer_name",
     "vat_number",
