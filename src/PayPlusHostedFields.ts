@@ -3,6 +3,7 @@ import ChargeRequest from "./ChargeRequest";
 import {
 	Config,
 	EventNames,
+	FieldStyles,
 	HTMLClasses,
 	HostedFieldData,
 	HostedFieldsKeys,
@@ -48,7 +49,7 @@ export default abstract class PayPlusHostedFields {
 	private __showRecaptcha: boolean = false;
 	private __recaptchaToken: string = "";
 	private __securee3dsIframeElm: HTMLIFrameElement | null = null;
-
+	private __hostedFieldsStyles: FieldStyles = {};
 	constructor() {
 		this.config = {
 			Secure3Ds: {
@@ -120,6 +121,10 @@ export default abstract class PayPlusHostedFields {
 		this.DataInput.AddField(fld, elmSelector, wrapperElmSelector);
 		return this;
 	}
+
+	SetHostedFieldsStyles(styles: FieldStyles) {
+        this.__hostedFieldsStyles = styles;
+    }
 
 	async CreatePaymentPage(data: {
 		origin: string;
@@ -507,15 +512,24 @@ export default abstract class PayPlusHostedFields {
 			: [];
 		classes.push(HTMLClasses.IFRAME_CLASS);
 		const wrapper = document.createElement("span");
+		const style = this.__hostedFieldsStyles
 		wrapper.setAttribute("class", "__payplus_hosted_fields_item_fld-wrapper");
 		const iframeElm = document.createElement("iframe");
 		iframeElm.setAttribute("data-uuid", this.__hosted_fields_uuid);
 		iframeElm.setAttribute("class", classes.join(" "));
 		iframeElm.setAttribute("id", `fld-${name}`);
-		iframeElm.setAttribute(
-			"src",
-			`${this.__origin}/api/hosted-field/${this.__page_request_uid}/${this.__hosted_fields_uuid}/${name}`
-		);
+
+		const srcAddr = new URL(this.__origin);
+		srcAddr.pathname = [
+			'api',
+			'hosted-field',
+			this.__page_request_uid,
+			this.__hosted_fields_uuid,
+			name].join("/");
+		if (style.fontSize) {
+			srcAddr.searchParams.set("inStyle", JSON.stringify(style));
+		}
+		iframeElm.setAttribute("src", srcAddr.toString());
 		iframeElm.setAttribute("frameborder", "0");
 		wrapper.appendChild(iframeElm);
 		elementReplacement.replaceWith(wrapper);

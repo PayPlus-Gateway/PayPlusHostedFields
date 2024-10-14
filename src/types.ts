@@ -49,6 +49,14 @@ type ExtraFieldData = {
 	};
 };
 
+type FieldStyles = {
+	fontSize?: {
+		size: number
+		unit: "px" | "em" | "rem" | "%"
+	},
+	fontColor?: string,
+}
+
 interface InitHostedFieldsData {
 	cc: {elmSelector: string, wrapperElmSelector: string},
 	cvv: {elmSelector: string, wrapperElmSelector: string},
@@ -127,5 +135,6 @@ export {
 	nonHostedFieldFieldsList,
 	HostedFieldsKeysList,
 	InitHostedFieldsData,
-	Config
+	Config,
+	FieldStyles
 };
