@@ -3,7 +3,6 @@ import ChargeRequest from "./ChargeRequest";
 import {
 	Config,
 	EventNames,
-	FieldStyles,
 	HTMLClasses,
 	HostedFieldData,
 	HostedFieldsKeys,
@@ -49,7 +48,7 @@ export default abstract class PayPlusHostedFields {
 	private __showRecaptcha: boolean = false;
 	private __recaptchaToken: string = "";
 	private __securee3dsIframeElm: HTMLIFrameElement | null = null;
-	private __hostedFieldsStyles: FieldStyles = {};
+	private __hostedFieldsStyles: string = "";
 	constructor() {
 		this.config = {
 			Secure3Ds: {
@@ -97,7 +96,8 @@ export default abstract class PayPlusHostedFields {
 			}
 			this.__hostedFields[key as HostedFieldsKeys] = {	
 				selector: fldsData[key as HostedFieldsKeys].elmSelector,
-				wrapperSelector: fldsData[key as HostedFieldsKeys].wrapperElmSelector
+				wrapperSelector: fldsData[key as HostedFieldsKeys].wrapperElmSelector,
+				config: fldsData[key as HostedFieldsKeys].config
 			};
 		}
 		
@@ -122,7 +122,7 @@ export default abstract class PayPlusHostedFields {
 		return this;
 	}
 
-	SetHostedFieldsStyles(styles: FieldStyles) {
+	SetHostedFieldsStyles(styles: string) {
         this.__hostedFieldsStyles = styles;
     }
 
@@ -512,13 +512,11 @@ export default abstract class PayPlusHostedFields {
 			: [];
 		classes.push(HTMLClasses.IFRAME_CLASS);
 		const wrapper = document.createElement("span");
-		const style = this.__hostedFieldsStyles
 		wrapper.setAttribute("class", "__payplus_hosted_fields_item_fld-wrapper");
 		const iframeElm = document.createElement("iframe");
 		iframeElm.setAttribute("data-uuid", this.__hosted_fields_uuid);
 		iframeElm.setAttribute("class", classes.join(" "));
 		iframeElm.setAttribute("id", `fld-${name}`);
-
 		const srcAddr = new URL(this.__origin);
 		srcAddr.pathname = [
 			'api',
@@ -526,8 +524,11 @@ export default abstract class PayPlusHostedFields {
 			this.__page_request_uid,
 			this.__hosted_fields_uuid,
 			name].join("/");
-		if (style.fontSize) {
-			srcAddr.searchParams.set("inStyle", JSON.stringify(style));
+		if (this.__hostedFieldsStyles) {
+			srcAddr.searchParams.set("inStyle", this.__hostedFieldsStyles);
+		}
+		if (this.__hostedFields[name as HostedFieldsKeys].config) {
+			srcAddr.searchParams.set("config", JSON.stringify(this.__hostedFields[name as HostedFieldsKeys].config));
 		}
 		iframeElm.setAttribute("src", srcAddr.toString());
 		iframeElm.setAttribute("frameborder", "0");

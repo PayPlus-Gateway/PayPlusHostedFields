@@ -29,6 +29,7 @@ interface NonHostedFields {
 interface HostedFieldData {
 	selector: string;
 	wrapperSelector: string;
+	config?: FieldConfig;
 	elm?: HTMLIFrameElement;
 	error?: string;
 }
@@ -49,20 +50,16 @@ type ExtraFieldData = {
 	};
 };
 
-type FieldStyles = {
-	fontSize?: {
-		size: number
-		unit: "px" | "em" | "rem" | "%"
-	},
-	fontColor?: string,
+type FieldConfig = {
+	placeholder?: string,
 }
 
 interface InitHostedFieldsData {
-	cc: {elmSelector: string, wrapperElmSelector: string},
-	cvv: {elmSelector: string, wrapperElmSelector: string},
-	expiry: {elmSelector: string, wrapperElmSelector: string},
-	expiryy: {elmSelector: string, wrapperElmSelector: string},
-	expirym: {elmSelector: string, wrapperElmSelector: string},
+	cc: {elmSelector: string, wrapperElmSelector: string, config?: FieldConfig},
+	cvv: {elmSelector: string, wrapperElmSelector: string, config?: FieldConfig},
+	expiry: {elmSelector: string, wrapperElmSelector: string, config?: FieldConfig},
+	expiryy: {elmSelector: string, wrapperElmSelector: string, config?: FieldConfig},
+	expirym: {elmSelector: string, wrapperElmSelector: string, config?: FieldConfig},
 }
 
 interface Config {
@@ -135,6 +132,5 @@ export {
 	nonHostedFieldFieldsList,
 	HostedFieldsKeysList,
 	InitHostedFieldsData,
-	Config,
-	FieldStyles
+	Config
 };
