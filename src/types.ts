@@ -52,6 +52,7 @@ type ExtraFieldData = {
 
 type FieldConfig = {
 	placeholder?: string,
+	fontName?: string
 }
 
 interface InitHostedFieldsData {
