@@ -45,6 +45,9 @@ export default abstract class PayPlusHostedFields {
 	
 	private __recaptchaReplacementElm: HTMLElement | null = null;
 	private __recaptchaIframeElm: HTMLIFrameElement | null = null;
+	private __applepayReplacementElm: HTMLElement | null = null;
+	private __applepayIframeElm: HTMLIFrameElement | null = null;
+	private __showApplePayButton: boolean = false;
 	private __showRecaptcha: boolean = false;
 	private __recaptchaToken: string = "";
 	private __securee3dsIframeElm: HTMLIFrameElement | null = null;
@@ -110,6 +113,15 @@ export default abstract class PayPlusHostedFields {
 			throw new Error("Missing required field data");
 		}
 		this.__recaptchaReplacementElm = document.querySelector(elmSelector);
+		return this;
+	}
+
+	SetApplePay(elmSelector: string) {
+		this.validateOrThrow();
+		if (!document.querySelector(elmSelector)) {
+			throw new Error("Missing required field data");
+		}
+		this.__applepayReplacementElm = document.querySelector(elmSelector);
 		return this;
 	}
 
@@ -217,24 +229,27 @@ export default abstract class PayPlusHostedFields {
 	}
 
 	private initNonHostedField(key: string, obj: any, settings?: any) {
-		if (obj.hasOwnProperty(key)) {
-			if (!this.showField(key)) {
-				this.DataInput.HideInput(key, obj)
-				return
-			}
-			this.DataInput.SetInput(key, obj)
-			if (this.__paymentPageData.customer[key]) {
-				this.DataInput.SetValue(key, obj, this.__paymentPageData.customer[key], true)
-			}
-			if (settings) {
-				if (settings.uid) {
-					obj[key].uid = settings.uid;
+		try {
+			if (obj.hasOwnProperty(key)) {
+				if (!this.showField(key)) {
+					this.DataInput.HideInput(key, obj)
+					return
 				}
+				this.DataInput.SetInput(key, obj)
+				if (this.__paymentPageData.customer[key]) {
+					this.DataInput.SetValue(key, obj, this.__paymentPageData.customer[key], true)
+				}
+				if (settings) {
+					if (settings.uid) {
+						obj[key].uid = settings.uid;
+					}
 
-				if (settings.hasOwnProperty("required")) {
-					obj[key].required = settings.required;
+					if (settings.hasOwnProperty("required")) {
+						obj[key].required = settings.required;
+					}
 				}
 			}
+		} catch (e) {
 		}
 	}
 
@@ -251,6 +266,7 @@ export default abstract class PayPlusHostedFields {
 			this.removeFieldAndWrapper("expirym");
 		}
 		this.initRecaptcha(data);
+		this.initApplePayButton(data);
 		
 		for (const key in this.DataInput.fields.non_hosted_fields) {
 			this.initNonHostedField(key, this.DataInput.fields.non_hosted_fields);
@@ -343,6 +359,9 @@ export default abstract class PayPlusHostedFields {
 							break;
 						case "secure-3ds":
 							this.toggleSecure3dsIframe(event.data.data)
+							break;
+						case "start-apple-pay":
+							this.startApplePayFlow()
 							break;
 						default:
 							if(event.data && event.data.messageTransaction3DS != null) {
@@ -553,6 +572,28 @@ export default abstract class PayPlusHostedFields {
 		this.fireCustomEvent(EventNames.SECURE_3DS_WINDOW, true);
 	}
 
+	private startApplePayFlow() {
+		this.fireCustomEvent(EventNames.SUBMIT_PROCESS, true)
+		this.toggleDisableForm(false)
+		this.__recaptchaIframeElm?.contentWindow?.postMessage({type: "execute-recaptcha-req"}, this.__origin)
+		//TODO need to check if its works on dev with recaptcha
+		this.collectChargeParameters()
+		const payload = this.ChargeRequest.GetData()
+		if (this.__applepayIframeElm?.contentWindow) {
+			this.__applepayIframeElm.contentWindow.postMessage(
+				{ type: "apple-pay-start", data: payload },
+				this.__origin
+			)
+		} else {
+			this.fireCustomEvent(EventNames.SUBMIT_PROCESS, false)
+			this.toggleDisableForm(true)
+			this.fireCustomEvent(EventNames.RESPONSE_FROM_SERVER, {
+				success: false,
+				message: "apple-pay-not-available",
+			})
+		}
+	}
+
 	private initRecaptcha(data:any) {
 		this.__showRecaptcha = data.data.payment_page.field_content_settings.show_recaptcha;
 		if (!this.__showRecaptcha) {
@@ -579,6 +620,36 @@ export default abstract class PayPlusHostedFields {
 		iframeElm.setAttribute("frameborder", "0");
 		this.__recaptchaReplacementElm.replaceWith(iframeElm);
 		this.__recaptchaIframeElm = iframeElm;
+	}
+
+	private initApplePayButton(data:any) {
+		this.__showApplePayButton = !!(data.data.payment_page.payment_methods?.find((i:any) => i?.payment_method_type_key === "apple-pay"))
+		if (!this.__showApplePayButton) {
+			return
+		}
+		if (this.__applepayReplacementElm == null) {
+			throw new Error("Missing required field data")
+		}
+		const iframeElm = document.createElement("iframe")
+		iframeElm.setAttribute("class", `hsted-Flds--apple-pay-iframe`)
+		iframeElm.setAttribute("id", `hsted-Flds--apple-pay-iframe`)
+		iframeElm.setAttribute("scrolling", `no`)
+		iframeElm.setAttribute("allow", "payment *")
+		iframeElm.setAttribute("allowpaymentrequest", "true")
+		iframeElm.setAttribute(
+			"src",
+			[
+				this.__origin,
+				"api",
+				"hosted-field",
+				this.__page_request_uid,
+				this.__hosted_fields_uuid,
+				"apple-pay"
+			].join("/")
+		);
+		iframeElm.setAttribute("frameborder", "0");
+		this.__applepayReplacementElm.replaceWith(iframeElm);
+		this.__applepayIframeElm = iframeElm;
 	}
 
 	private hideCVVIframe() {
@@ -624,6 +695,11 @@ export default abstract class PayPlusHostedFields {
 			}.hsted-Flds--r-recaptcha-iframe.hsted-Flds--r-recaptcha-iframe--v3:hover {
 				right : 0 !important;
 				transition: right 0.3s ease 0s !important;
+			}
+			.hsted-Flds--apple-pay-iframe {
+				width: 100%;
+				height: 48px;
+				border: 0;
 			}`];
 		if (!this.config.Secure3Ds.ResetStyle) {
 			css.push(`.hsted-Flds--r-secure3ds-iframe{
