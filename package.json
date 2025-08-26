@@ -1,6 +1,6 @@
 {
   "name": "payplus-hosted-fields",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "PayPlus Hosted Fields",
   "scripts": {
     "clean": "rm -rf dist",

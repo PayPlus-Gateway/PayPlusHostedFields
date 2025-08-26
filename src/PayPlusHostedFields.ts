@@ -223,7 +223,7 @@ export default abstract class PayPlusHostedFields {
 				return
 			}
 			this.DataInput.SetInput(key, obj)
-			if (this.__paymentPageData.customer[key]) {
+			if (this.__paymentPageData.customer && this.__paymentPageData.customer[key]) {
 				this.DataInput.SetValue(key, obj, this.__paymentPageData.customer[key], true)
 			}
 			if (settings) {
