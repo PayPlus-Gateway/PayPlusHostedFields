@@ -229,27 +229,24 @@ export default abstract class PayPlusHostedFields {
 	}
 
 	private initNonHostedField(key: string, obj: any, settings?: any) {
-		try {
-			if (obj.hasOwnProperty(key)) {
-				if (!this.showField(key)) {
-					this.DataInput.HideInput(key, obj)
-					return
+		if (obj.hasOwnProperty(key)) {
+			if (!this.showField(key)) {
+				this.DataInput.HideInput(key, obj)
+				return
+			}
+			this.DataInput.SetInput(key, obj)
+			if (this.__paymentPageData.customer && this.__paymentPageData.customer[key]) {
+				this.DataInput.SetValue(key, obj, this.__paymentPageData.customer[key], true)
+			}
+			if (settings) {
+				if (settings.uid) {
+					obj[key].uid = settings.uid;
 				}
-				this.DataInput.SetInput(key, obj)
-				if (this.__paymentPageData.customer[key]) {
-					this.DataInput.SetValue(key, obj, this.__paymentPageData.customer[key], true)
-				}
-				if (settings) {
-					if (settings.uid) {
-						obj[key].uid = settings.uid;
-					}
 
-					if (settings.hasOwnProperty("required")) {
-						obj[key].required = settings.required;
-					}
+				if (settings.hasOwnProperty("required")) {
+					obj[key].required = settings.required;
 				}
 			}
-		} catch (e) {
 		}
 	}
 
@@ -267,7 +264,7 @@ export default abstract class PayPlusHostedFields {
 		}
 		this.initRecaptcha(data);
 		this.initApplePayButton(data);
-		
+
 		for (const key in this.DataInput.fields.non_hosted_fields) {
 			this.initNonHostedField(key, this.DataInput.fields.non_hosted_fields);
 		}
