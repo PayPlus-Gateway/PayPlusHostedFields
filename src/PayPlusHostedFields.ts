@@ -670,7 +670,7 @@ export default abstract class PayPlusHostedFields {
 		}
 
 		if (!this.__applepayReplacementElm) {
-			throw new Error("Missing required field data")
+			return
 		}
 		const iframeElm = document.createElement("iframe")
 		iframeElm.setAttribute("class", `hsted-Flds--apple-pay-iframe`)
@@ -701,7 +701,7 @@ export default abstract class PayPlusHostedFields {
 			return
 		}
 		if (!this.__googlepayReplacementElm) {
-			throw new Error("Missing required field data")
+			return
 		}
 		const iframeElm = document.createElement("iframe")
 		iframeElm.setAttribute("class", `hsted-Flds--google-pay-iframe`)
