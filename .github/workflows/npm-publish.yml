@@ -1,14 +1,10 @@
 # Builds dist/ and publishes the package to npm when a GitHub release is created.
 #
-# Auth uses npm Trusted Publishing (OIDC) - there is no NPM_TOKEN secret.
-# npm must be configured to trust this repo + workflow filename:
-#   npmjs.com -> payplus-hosted-fields -> Settings -> Trusted Publisher -> GitHub Actions
-#     Organization or user: PayplusPayment
-#     Repository:           PayPlusHostedFields
-#     Workflow filename:    npm-publish.yml
-# Renaming this file breaks publishing until the trusted publisher is updated to match.
+# Auth uses an npm granular access token stored as the NPM_TOKEN repo secret.
+# npm caps write tokens at 90 days, so this secret must be rotated periodically.
+# To stop rotating it, switch to Trusted Publishing (OIDC): https://docs.npmjs.com/trusted-publishers/
 #
-# See: https://docs.npmjs.com/trusted-publishers/
+# See: https://docs.github.com/en/actions/publishing-packages/publishing-nodejs-packages
 
 name: Publish to npm
 
@@ -19,7 +15,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write # required for OIDC trusted publishing
 
 jobs:
   build-and-publish:
@@ -29,15 +24,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           registry-url: https://registry.npmjs.org/
           cache: npm
-
-      # Trusted publishing needs npm >= 11.5.1, newer than what the runner ships.
-      - name: Upgrade npm
-        run: |
-          npm install -g npm@latest
-          npm --version
 
       - name: Install dependencies
         run: npm ci
@@ -62,6 +51,19 @@ jobs:
             echo "::warning::package.json version ($PKG_VERSION) does not match release tag ($GITHUB_REF_NAME)"
           fi
 
+      - name: Check npm authentication
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "::error::NPM_TOKEN secret is empty or not set in this repository"
+            exit 1
+          fi
+          npm whoami || {
+            echo "::error::npm rejected NPM_TOKEN (expired, revoked, or read-only). A bad token makes 'npm publish' fail with a misleading 404."
+            exit 1
+          }
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Check version is not already published
         run: |
           PKG_NAME="$(node -p "require('./package.json').name")"
@@ -72,7 +74,7 @@ jobs:
           fi
           echo "${PKG_NAME}@${PKG_VERSION} is not yet published"
 
-      # No NODE_AUTH_TOKEN: the npm CLI detects the GitHub OIDC environment and
-      # authenticates itself. Provenance attestations are generated automatically.
       - name: Publish
         run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
