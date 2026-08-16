@@ -1,5 +1,14 @@
 # Builds dist/ and publishes the package to npm when a GitHub release is created.
-# See: https://docs.github.com/en/actions/publishing-packages/publishing-nodejs-packages
+#
+# Auth uses npm Trusted Publishing (OIDC) - there is no NPM_TOKEN secret.
+# npm must be configured to trust this repo + workflow filename:
+#   npmjs.com -> payplus-hosted-fields -> Settings -> Trusted Publisher -> GitHub Actions
+#     Organization or user: PayplusPayment
+#     Repository:           PayPlusHostedFields
+#     Workflow filename:    npm-publish.yml
+# Renaming this file breaks publishing until the trusted publisher is updated to match.
+#
+# See: https://docs.npmjs.com/trusted-publishers/
 
 name: Publish to npm
 
@@ -10,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write # required for OIDC trusted publishing
 
 jobs:
   build-and-publish:
@@ -19,9 +29,15 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           registry-url: https://registry.npmjs.org/
           cache: npm
+
+      # Trusted publishing needs npm >= 11.5.1, newer than what the runner ships.
+      - name: Upgrade npm
+        run: |
+          npm install -g npm@latest
+          npm --version
 
       - name: Install dependencies
         run: npm ci
@@ -46,7 +62,17 @@ jobs:
             echo "::warning::package.json version ($PKG_VERSION) does not match release tag ($GITHUB_REF_NAME)"
           fi
 
+      - name: Check version is not already published
+        run: |
+          PKG_NAME="$(node -p "require('./package.json').name")"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if npm view "${PKG_NAME}@${PKG_VERSION}" version >/dev/null 2>&1; then
+            echo "::error::${PKG_NAME}@${PKG_VERSION} is already published. Bump the version in package.json."
+            exit 1
+          fi
+          echo "${PKG_NAME}@${PKG_VERSION} is not yet published"
+
+      # No NODE_AUTH_TOKEN: the npm CLI detects the GitHub OIDC environment and
+      # authenticates itself. Provenance attestations are generated automatically.
       - name: Publish
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
