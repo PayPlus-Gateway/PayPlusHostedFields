@@ -1,4 +1,4 @@
-# Builds dist/ and publishes the package to npm when a GitHub release is created.
+# Builds dist/ and publishes the package to npm when a v* tag is pushed or a GitHub release is created.
 #
 # Auth uses an npm granular access token stored as the NPM_TOKEN repo secret.
 # npm caps write tokens at 90 days, so this secret must be rotated periodically.
@@ -9,6 +9,9 @@
 name: Publish to npm
 
 on:
+  push:
+    tags:
+      - "v*"
   release:
     types: [published]
   workflow_dispatch:
@@ -49,6 +52,16 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           if [ "$PKG_VERSION" != "$TAG" ]; then
             echo "::warning::package.json version ($PKG_VERSION) does not match release tag ($GITHUB_REF_NAME)"
+          fi
+
+      - name: Check version matches pushed tag
+        if: github.event_name == 'push'
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG" ]; then
+            echo "::error::package.json version ($PKG_VERSION) does not match pushed tag ($GITHUB_REF_NAME)"
+            exit 1
           fi
 
       - name: Check npm authentication
