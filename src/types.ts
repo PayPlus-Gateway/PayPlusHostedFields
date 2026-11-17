@@ -82,7 +82,12 @@ enum EventNames {
 	SUBMIT_PROCESS = "pp_submitProcess",
 	CC_TYPE_CHANGE = "pp_ccTypeChange",
 	SECURE_3DS_WINDOW = "pp_secure3dsWindow",
+	RECAPTCHA_VERSION_CHANGE = "pp_recaptchaVersionChange",
+	RECAPTCHA_CHALLENGE = "pp_recaptchaChallenge",
+	WALLETS_BLOCKED = "pp_walletsBlocked",
 }
+
+type RecaptchaVersion = 2 | 3 | null;
 
 type HostedFieldsKeys = 'cc' | 'cvv' | 'expiry' | 'expiryy' | 'expirym';
 
@@ -133,5 +138,6 @@ export {
 	nonHostedFieldFieldsList,
 	HostedFieldsKeysList,
 	InitHostedFieldsData,
-	Config
+	Config,
+	RecaptchaVersion
 };

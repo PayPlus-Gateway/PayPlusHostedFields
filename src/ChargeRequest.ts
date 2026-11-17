@@ -37,7 +37,6 @@ class ChargeRequest {
                 data[key] = this[key as keyof ChargeRequest];
             }
         }
-        console.log(this.payment.recaptcha_hash)
         return data;
     }
 

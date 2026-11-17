@@ -8,9 +8,27 @@ import {
 	HostedFieldsKeys,
 	HostedFieldsKeysList,
 	InitHostedFieldsData,
+	RecaptchaVersion,
 	nonHostedFieldsMapping,
 } from "./types";
 import { deferred } from "./utils";
+
+const RECAPTCHA_SUBMIT_TIMEOUT_MS = 15000;
+// v3 tokens expire after 2 minutes
+const RECAPTCHA_V3_REFRESH_MS = 90000;
+const RECAPTCHA_V3_RETRY_MS = 5000;
+const RECAPTCHA_V3_MAX_RETRIES = 3;
+const RECAPTCHA_DOWNGRADE_ERRORS = ["recaptcha-declined-your-request", "recaptcha-is-under-trust-score"];
+
+interface SubmitState {
+	dfrd: any;
+	savedFields: { [key: string]: boolean };
+	// undefined while waiting for the v3 token of this submit
+	recaptchaToken?: string | null;
+	recaptchaTimer?: ReturnType<typeof setTimeout>;
+	done: boolean;
+}
+
 export default abstract class PayPlusHostedFields {
 	abstract DataInput: BaseDataInput;
 	InitPaymentPage: any;
@@ -22,18 +40,7 @@ export default abstract class PayPlusHostedFields {
 	private __paymentPageData: any;
 	private __origin: string = "";
 	private __paymentPageDfrd: any = null;
-	private __AwaitingFields: { 
-		cc: boolean,
-		expiry?: boolean, 
-		expiryy?: boolean
-		expirym?: boolean,
-		recaptcha?: boolean
-	 } = {
-		cc: false,
-		expiry: false,
-		expiryy: false,
-		expirym: false,
-	};
+	private __currentSubmit: SubmitState | null = null;
 	private __hostedFields: {
 		cc: HostedFieldData;
 		cvv: HostedFieldData;
@@ -51,8 +58,13 @@ export default abstract class PayPlusHostedFields {
 	private __googlepayReplacementElm: HTMLElement | null = null;
 	private __googlepayIframeElm: HTMLIFrameElement | null = null;
 	private __showGooglePayButton: boolean = false;
-	private __showRecaptcha: boolean = false;
+	private __recaptchaVersion: RecaptchaVersion = null;
+	// v2: the solved checkbox token. v3: a pre-fetched token reserved for wallet payments.
 	private __recaptchaToken: string = "";
+	private __recaptchaTokenUsed: boolean = false;
+	private __recaptchaV3RefreshTimer: ReturnType<typeof setTimeout> | null = null;
+	private __recaptchaV3Retries: number = 0;
+	private __walletsBlocked: boolean = false;
 	private __securee3dsIframeElm: HTMLIFrameElement | null = null;
 	private __hostedFieldsStyles: string = "";
 	constructor() {
@@ -170,10 +182,31 @@ export default abstract class PayPlusHostedFields {
 	}
 
 	SubmitPayment() {
-		this.__paymentPageDfrd = deferred();
+		if (this.__currentSubmit) {
+			this.endSubmit(this.__currentSubmit);
+		}
+		const submit: SubmitState = { dfrd: deferred(), savedFields: {}, done: false };
+		this.__currentSubmit = submit;
+		this.__paymentPageDfrd = submit.dfrd;
 		this.fireCustomEvent(EventNames.SUBMIT_PROCESS, true);
 		this.toggleDisableForm(false);
 		this.ResetInputs();
+		if (this.__recaptchaVersion === 2 && !this.__recaptchaToken) {
+			this.formResponse({ success: false, message: "recaptcha-confirmation-is-missing" });
+			return submit.dfrd;
+		}
+		if (this.__recaptchaVersion === 3 && this.__recaptchaIframeElm?.contentWindow) {
+			submit.recaptchaToken = undefined;
+			submit.recaptchaTimer = setTimeout(() => {
+				this.onSubmitRecaptchaToken(submit, null);
+			}, RECAPTCHA_SUBMIT_TIMEOUT_MS);
+			this.__recaptchaIframeElm.contentWindow.postMessage(
+				{ type: "execute-recaptcha-req" },
+				this.__origin
+			);
+		} else {
+			submit.recaptchaToken = null;
+		}
 		this.__hostedFields.cc.elm!.contentWindow!.postMessage(
 			{ type: "save-fld-data-to-srv" },
 			this.__origin
@@ -194,13 +227,7 @@ export default abstract class PayPlusHostedFields {
 				this.__origin
 			);
 		}
-		if (this.__recaptchaIframeElm) {
-			this.__recaptchaIframeElm!.contentWindow!.postMessage(
-				{ type: "execute-recaptcha-req" },
-				this.__origin
-			);
-		}
-		return this.__paymentPageDfrd;
+		return submit.dfrd;
 	}
 
 	GetRemainingAttempts() {
@@ -217,13 +244,6 @@ export default abstract class PayPlusHostedFields {
 	}
 
 	ResetInputs() {
-		this.__AwaitingFields = {
-			cc: false,
-			expiry: false,
-			expiryy: false,
-			expirym: false,
-			recaptcha: false,
-		};
 		let fields = ['cc', 'cvv']
 		if (this.__expirySeparateFields) {
 			fields.push('expiryy', 'expirym')
@@ -277,6 +297,7 @@ export default abstract class PayPlusHostedFields {
 		this.initRecaptcha(data);
 		this.initApplePayButton(data);
 		this.initGooglePayButton(data);
+		this.updateWalletsBlocked();
 
 		for (const key in this.DataInput.fields.non_hosted_fields) {
 			this.initNonHostedField(key, this.DataInput.fields.non_hosted_fields);
@@ -376,6 +397,16 @@ export default abstract class PayPlusHostedFields {
 						case "start-google-pay":
 						this.startGooglePayFlow()
 							break;
+						case "recaptcha-token":
+							if (this.isFromRecaptchaIframe(event)) {
+								this.event_recaptchaToken(event.data.data);
+							}
+							break;
+						case "recaptcha-challenge":
+							if (this.isFromRecaptchaIframe(event)) {
+								this.event_recaptchaChallenge(!!event.data.data);
+							}
+							break;
 						default:
 							if(event.data && event.data.messageTransaction3DS != null) {
 								this.toggleSecure3dsIframe(null)
@@ -421,27 +452,146 @@ export default abstract class PayPlusHostedFields {
 	}
 
 	private event_srvResponseMsg(event: any) {
-		this.__AwaitingFields[
-			event.data.name as keyof typeof this.__AwaitingFields
-		] = true;
-		if (event.data.name == 'recaptcha') {
-			this.__recaptchaToken = event.data.data;
-			this.__AwaitingFields.recaptcha = false;
-		} else {
-			if (!event.data.data.success) {
-				this.__hostedFields[event.data.name as HostedFieldsKeys].error = event.data.data.message;
-				this.__hostedFields[event.data.name as HostedFieldsKeys].elm!.classList.add(HTMLClasses.IFRAME_CLASS_ERR);
-				this.formResponse(event.data.data);
-			}
+		const name = event.data.name as HostedFieldsKeys;
+		// Legacy reCAPTCHA message, no longer sent by the API.
+		if (!this.__hostedFields[name]) {
+			return;
 		}
-		if (this.__AwaitingFields.cc) {
-			if (
-				this.__AwaitingFields.expiry
-				|| (this.__AwaitingFields.expirym && this.__AwaitingFields.expiryy)) {
-					if (!this.__showRecaptcha || !this.__AwaitingFields.recaptcha) {
-						this.readyToSubmit();
-					}
+		const submit = this.__currentSubmit;
+		if (!event.data.data || !event.data.data.success) {
+			this.__hostedFields[name].error = event.data.data?.message;
+			this.__hostedFields[name].elm?.classList.add(HTMLClasses.IFRAME_CLASS_ERR);
+			if (submit && !submit.done) {
+				this.formResponse(event.data.data || { success: false });
 			}
+			return;
+		}
+		if (!submit || submit.done) {
+			return;
+		}
+		submit.savedFields[name] = true;
+		this.trySubmit(submit);
+	}
+
+	private trySubmit(submit: SubmitState) {
+		if (submit !== this.__currentSubmit || submit.done) {
+			return;
+		}
+		const saved = submit.savedFields;
+		const expirySaved = this.__expirySeparateFields
+			? saved.expirym && saved.expiryy
+			: saved.expiry;
+		if (!saved.cc || !expirySaved || submit.recaptchaToken === undefined) {
+			return;
+		}
+		if (this.__recaptchaVersion === 3 && !submit.recaptchaToken) {
+			this.formResponse({ success: false, message: "recaptcha-confirmation-is-missing" });
+			return;
+		}
+		this.endSubmit(submit);
+		this.readyToSubmit(submit.recaptchaToken || this.__recaptchaToken);
+	}
+
+	private endSubmit(submit: SubmitState) {
+		submit.done = true;
+		if (submit.recaptchaTimer) {
+			clearTimeout(submit.recaptchaTimer);
+			submit.recaptchaTimer = undefined;
+		}
+	}
+
+	private onSubmitRecaptchaToken(submit: SubmitState, token: string | null) {
+		if (submit.done || submit.recaptchaToken !== undefined) {
+			return;
+		}
+		if (submit.recaptchaTimer) {
+			clearTimeout(submit.recaptchaTimer);
+			submit.recaptchaTimer = undefined;
+		}
+		submit.recaptchaToken = token || null;
+		this.trySubmit(submit);
+	}
+
+	private isFromRecaptchaIframe(event: MessageEvent) {
+		return !!this.__recaptchaIframeElm
+			&& event.origin === this.__origin
+			&& event.source === this.__recaptchaIframeElm.contentWindow;
+	}
+
+	private event_recaptchaToken(token: string | null) {
+		const value = typeof token === "string" && token ? token : null;
+		if (this.__recaptchaVersion === 3) {
+			const submit = this.__currentSubmit;
+			if (submit && !submit.done && submit.recaptchaToken === undefined) {
+				this.onSubmitRecaptchaToken(submit, value);
+				return;
+			}
+			this.storeV3PrefetchedToken(value);
+			return;
+		}
+		if (this.__recaptchaVersion === 2) {
+			this.__recaptchaToken = value || "";
+			this.__recaptchaTokenUsed = false;
+			this.updateWalletsBlocked();
+		}
+	}
+
+	private event_recaptchaChallenge(open: boolean) {
+		this.__recaptchaIframeElm?.classList.toggle("hsted-Flds--r-recaptcha-iframe--challenge", open);
+		this.fireCustomEvent(EventNames.RECAPTCHA_CHALLENGE, open);
+	}
+
+	private requestV3Token() {
+		this.__recaptchaIframeElm?.contentWindow?.postMessage(
+			{ type: "execute-recaptcha-req" },
+			this.__origin
+		);
+	}
+
+	private prefetchV3Token() {
+		if (this.__recaptchaVersion !== 3) {
+			return;
+		}
+		this.scheduleV3Prefetch(RECAPTCHA_V3_REFRESH_MS);
+		this.requestV3Token();
+	}
+
+	private scheduleV3Prefetch(delay: number) {
+		if (this.__recaptchaV3RefreshTimer) {
+			clearTimeout(this.__recaptchaV3RefreshTimer);
+		}
+		this.__recaptchaV3RefreshTimer = setTimeout(() => this.prefetchV3Token(), delay);
+	}
+
+	private storeV3PrefetchedToken(token: string | null) {
+		if (token) {
+			this.__recaptchaToken = token;
+			this.__recaptchaV3Retries = 0;
+			this.scheduleV3Prefetch(RECAPTCHA_V3_REFRESH_MS);
+		} else if (this.__recaptchaV3Retries < RECAPTCHA_V3_MAX_RETRIES) {
+			this.__recaptchaV3Retries++;
+			this.scheduleV3Prefetch(RECAPTCHA_V3_RETRY_MS);
+		}
+	}
+
+	private stopV3Prefetch() {
+		if (this.__recaptchaV3RefreshTimer) {
+			clearTimeout(this.__recaptchaV3RefreshTimer);
+			this.__recaptchaV3RefreshTimer = null;
+		}
+		this.__recaptchaV3Retries = 0;
+	}
+
+	private updateWalletsBlocked() {
+		const blocked = this.__recaptchaVersion === 2 && !this.__recaptchaToken;
+		const walletIframes = [this.__applepayIframeElm, this.__googlepayIframeElm]
+			.filter((elm): elm is HTMLIFrameElement => !!elm);
+		for (const elm of walletIframes) {
+			elm.classList.toggle("hsted-Flds--wallet-blocked", blocked);
+		}
+		if (walletIframes.length && blocked !== this.__walletsBlocked) {
+			this.__walletsBlocked = blocked;
+			this.fireCustomEvent(EventNames.WALLETS_BLOCKED, blocked);
 		}
 	}
 
@@ -504,26 +654,76 @@ export default abstract class PayPlusHostedFields {
 				}
 			}
 		}
+		if (this.__currentSubmit) {
+			this.endSubmit(this.__currentSubmit);
+		}
+		if (this.__recaptchaVersion === 2 && this.__recaptchaTokenUsed) {
+			this.resetRecaptchaV2();
+		}
+		if (this.__recaptchaVersion === 3 && this.isRecaptchaDowngradeResponse(data)) {
+			this.switchRecaptchaToV2();
+		}
 		this.fireCustomEvent(EventNames.RESPONSE_FROM_SERVER, data);
 		this.fireCustomEvent(EventNames.SUBMIT_PROCESS, false);
 		this.toggleDisableForm(true);
-		this.__paymentPageDfrd.resolve(data);
+		this.__paymentPageDfrd?.resolve(data);
 	}
 
-	private collectChargeParameters() {
+	private isRecaptchaDowngradeResponse(data: any) {
+		if (!data || data.success !== false) {
+			return false;
+		}
+		const messages = [data.message, data.error, data.data?.message];
+		if (Array.isArray(data.errors)) {
+			for (const err of data.errors) {
+				messages.push(typeof err === "string" ? err : err?.message);
+			}
+		}
+		return messages.some((msg) => RECAPTCHA_DOWNGRADE_ERRORS.includes(msg));
+	}
+
+	private resetRecaptchaV2() {
+		this.__recaptchaToken = "";
+		this.__recaptchaTokenUsed = false;
+		this.__recaptchaIframeElm?.contentWindow?.postMessage(
+			{ type: "reset-recaptcha" },
+			this.__origin
+		);
+		this.updateWalletsBlocked();
+	}
+
+	private switchRecaptchaToV2() {
+		this.stopV3Prefetch();
+		this.__recaptchaVersion = 2;
+		this.__recaptchaToken = "";
+		this.__recaptchaTokenUsed = false;
+		if (this.__recaptchaIframeElm) {
+			// A new iframe (rather than a new src) gives a new contentWindow, so late v3 messages are ignored.
+			const iframeElm = this.createRecaptchaIframe(2);
+			this.__recaptchaIframeElm.replaceWith(iframeElm);
+			this.__recaptchaIframeElm = iframeElm;
+		}
+		this.updateWalletsBlocked();
+		this.fireCustomEvent(EventNames.RECAPTCHA_VERSION_CHANGE, 2);
+	}
+
+	private collectChargeParameters(recaptchaToken: string) {
 		this.ChargeRequest.Reset();
 		const inputData = this.DataInput.GetInput()
 		for (const [key, value] of Object.entries(inputData)) {
 			let fieldGroup = nonHostedFieldsMapping[key] || "extra_fields";
 			this.ChargeRequest.SetParam(value, key, fieldGroup);
 		}
-		if (this.__recaptchaToken) {
-			this.ChargeRequest.SetParam(this.__recaptchaToken, 'recaptcha_hash', 'payment');
+		if (recaptchaToken) {
+			this.ChargeRequest.SetParam(recaptchaToken, 'recaptcha_hash', 'payment');
+			if (this.__recaptchaVersion === 2) {
+				this.__recaptchaTokenUsed = true;
+			}
 		}
 	}
 
-	private readyToSubmit() {
-		this.collectChargeParameters();
+	private readyToSubmit(recaptchaToken: string) {
+		this.collectChargeParameters(recaptchaToken);
 		this.__hostedFields.cvv.elm!.contentWindow!.postMessage(
 			{ type: "submit-payment-form-to-srv", data: this.ChargeRequest.GetData() },
 			this.__origin
@@ -588,9 +788,7 @@ export default abstract class PayPlusHostedFields {
 	private startApplePayFlow() {
 		this.fireCustomEvent(EventNames.SUBMIT_PROCESS, true)
 		this.toggleDisableForm(false)
-		this.__recaptchaIframeElm?.contentWindow?.postMessage({type: "execute-recaptcha-req"}, this.__origin)
-		//TODO need to check if its works on dev with recaptcha
-		this.collectChargeParameters()
+		this.collectChargeParameters(this.takeWalletRecaptchaToken())
 		const payload = this.ChargeRequest.GetData()
 		if (this.__applepayIframeElm?.contentWindow) {
 			this.__applepayIframeElm.contentWindow.postMessage(
@@ -610,9 +808,7 @@ export default abstract class PayPlusHostedFields {
 	private startGooglePayFlow() {
 		this.fireCustomEvent(EventNames.SUBMIT_PROCESS, true)
 		this.toggleDisableForm(false)
-		this.__recaptchaIframeElm?.contentWindow?.postMessage({type: "execute-recaptcha-req"}, this.__origin)
-		//TODO need to check if its works on dev with recaptcha
-		this.collectChargeParameters()
+		this.collectChargeParameters(this.takeWalletRecaptchaToken())
 		const payload = this.ChargeRequest.GetData()
 		if (this.__googlepayIframeElm?.contentWindow) {
 			this.__googlepayIframeElm.contentWindow.postMessage(
@@ -629,16 +825,40 @@ export default abstract class PayPlusHostedFields {
 		}
 	}
 
+	// Wallet sheets need an immediate reply, so this never waits for a fresh token.
+	private takeWalletRecaptchaToken() {
+		const token = this.__recaptchaToken;
+		if (this.__recaptchaVersion === 3) {
+			this.__recaptchaToken = "";
+			this.prefetchV3Token();
+		}
+		return token;
+	}
+
+	private getRecaptchaVersion(data: any): RecaptchaVersion {
+		const settings = data.data.payment_page.field_content_settings || {};
+		const version = data.data.recaptcha_version
+			?? (settings.show_recaptcha ? settings.recaptcha_version : null);
+		const num = Number(version);
+		return version !== null && version !== "" && (num === 2 || num === 3) ? num : null;
+	}
+
 	private initRecaptcha(data:any) {
-		this.__showRecaptcha = data.data.payment_page.field_content_settings.show_recaptcha;
-		if (!this.__showRecaptcha) {
+		this.__recaptchaVersion = this.getRecaptchaVersion(data);
+		if (!this.__recaptchaVersion) {
 			return
 		}
 		if (this.__recaptchaReplacementElm == null) {
 			throw new Error("Missing required field data");
 		}
+		const iframeElm = this.createRecaptchaIframe(this.__recaptchaVersion);
+		this.__recaptchaReplacementElm.replaceWith(iframeElm);
+		this.__recaptchaIframeElm = iframeElm;
+	}
+
+	private createRecaptchaIframe(version: 2 | 3) {
 		const iframeElm = document.createElement("iframe");
-		iframeElm.setAttribute("class", `hsted-Flds--r-recaptcha-iframe hsted-Flds--r-recaptcha-iframe--v3`);		
+		iframeElm.setAttribute("class", `hsted-Flds--r-recaptcha-iframe hsted-Flds--r-recaptcha-iframe--v${version}`);
 		iframeElm.setAttribute("id", `hsted-Flds--r-recaptcha-iframe`);
 		iframeElm.setAttribute("scrolling", `no`);
 		iframeElm.setAttribute(
@@ -649,12 +869,18 @@ export default abstract class PayPlusHostedFields {
 				this.__page_request_uid,
 				this.__hosted_fields_uuid,
 				"recaptcha",
-				3
+				version
 			].join("/")
 		);
 		iframeElm.setAttribute("frameborder", "0");
-		this.__recaptchaReplacementElm.replaceWith(iframeElm);
-		this.__recaptchaIframeElm = iframeElm;
+		if (version === 3) {
+			iframeElm.addEventListener("load", () => {
+				if (this.__recaptchaIframeElm === iframeElm) {
+					this.prefetchV3Token();
+				}
+			});
+		}
+		return iframeElm;
 	}
 
 	private initApplePayButton(data:any) {
@@ -767,6 +993,22 @@ export default abstract class PayPlusHostedFields {
 			}.hsted-Flds--r-recaptcha-iframe.hsted-Flds--r-recaptcha-iframe--v3:hover {
 				right : 0 !important;
 				transition: right 0.3s ease 0s !important;
+			}
+			.hsted-Flds--r-recaptcha-iframe.hsted-Flds--r-recaptcha-iframe--v2 {
+				display: block;
+				width: 304px;
+				max-width: 100%;
+				height: 78px;
+				border: 0;
+			}
+			.hsted-Flds--r-recaptcha-iframe.hsted-Flds--r-recaptcha-iframe--v2.hsted-Flds--r-recaptcha-iframe--challenge {
+				width: 100%;
+				height: 600px;
+			}
+			.hsted-Flds--apple-pay-iframe.hsted-Flds--wallet-blocked,
+			.hsted-Flds--google-pay-iframe.hsted-Flds--wallet-blocked {
+				pointer-events: none;
+				opacity: .6;
 			}
 			.hsted-Flds--apple-pay-iframe {
 				width: 100%;
